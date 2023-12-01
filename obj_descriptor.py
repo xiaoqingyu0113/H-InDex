@@ -1,0 +1,217 @@
+import numpy as np
+import os 
+import glob
+from tqdm import tqdm
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+import matplotlib.pyplot as plt
+from torch.utils.data.sampler import SubsetRandomSampler
+
+from torch.utils.data import Dataset, DataLoader,random_split
+from torchvision import datasets, transforms
+import torchvision.models as models
+from torchvision.io import read_image
+
+
+
+def imshow(img):
+    plt.imshow(np.transpose(img, (1, 2, 0)))  # convert from Tensor image
+
+
+# define the NN architecture
+class ConvAutoencoder(nn.Module):
+    def __init__(self):
+        super(ConvAutoencoder, self).__init__()
+        ## encoder layers ##
+        self.conv1 = nn.Conv2d(3, 128, 3, padding=1)  
+        self.conv2 = nn.Conv2d(128, 64, 3, padding=1)
+        self.conv3 = nn.Conv2d(64, 16, 3, padding=1)
+        self.conv4 = nn.Conv2d(16, 4, 3, padding=1)
+        self.pool = nn.MaxPool2d(2, 2)
+        
+        ## decoder layers ##
+        ## a kernel of 2 and a stride of 2 will increase the spatial dims by 2
+        self.t_conv1 = nn.ConvTranspose2d(4, 16, 2, stride=2)
+        self.t_conv2 = nn.ConvTranspose2d(16, 32, 2, stride=2)
+        self.t_conv3 = nn.ConvTranspose2d(32,64, 2, stride=2)
+        self.t_conv4 = nn.ConvTranspose2d(64, 3, 2, stride=2)
+
+        self.lk_relu = nn.LeakyReLU(0.1)
+        self.resnet50  = models.resnet50(pretrained=True) 
+        # for name, child in self.resnet50.named_children():
+        #     if name not in ['layer4', 'fc']:
+        #         for param in child.parameters():
+        #             param.requires_grad = False
+
+        self.resnet50.fc = torch.nn.Linear(self.resnet50.fc.in_features, 4*16*16)
+
+    def forward(self, x):
+        ## encode ##
+        # x = self.lk_relu(self.conv1(x))
+        # x = self.pool(x)
+
+        # x = self.lk_relu(self.conv2(x))
+        # x = self.pool(x)  
+
+        # x = self.lk_relu(self.conv3(x))
+        # x = self.pool(x)  
+
+        # x = self.lk_relu(self.conv4(x))
+        # x = self.pool(x)  
+
+        x = self.resnet50(x)
+        x = x.view(x.size(0),4,16,16)
+
+        
+        ## decode ##
+        x = self.lk_relu(self.t_conv1(x))
+        x = self.lk_relu(self.t_conv2(x))
+        x = self.lk_relu(self.t_conv3(x))
+        x = torch.sigmoid(self.t_conv4(x))
+        # print(x.shape)
+        # raise
+                
+        return x
+    
+class AdroitImgDataset(Dataset):
+    def __init__(self, transform=None):
+        self.directory = 'AdroitImgDataset/relocate-large_clamp'
+        self.transform = transform
+        self.images = glob.glob(self.directory+'/**/*.png')
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        img_path = self.images[idx]
+        image = read_image(img_path)/255.0
+
+        if self.transform:
+            image = self.transform(image)
+        label = torch.tensor([0]) 
+        return image, label
+    
+def test_dataset():
+    train_data = AdroitImgDataset()
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=20, num_workers=4)
+    dataiter = iter(train_loader)
+    images, labels = dataiter.next()
+    images = images.numpy() # convert images to numpy for display
+
+    # plot the images in the batch, along with the corresponding labels
+    fig = plt.figure(figsize=(25, 4))
+    # display 20 images
+    for idx in np.arange(20):
+        ax = fig.add_subplot(2, 20//2, idx+1, xticks=[], yticks=[])
+        imshow(images[idx])
+    plt.show()
+
+def test_reconstruction():
+    num_workers = 0
+    batch_size = 20
+
+    dataset = AdroitImgDataset()
+    train_size = int(len(dataset)*0.7)
+    test_size = len(dataset) - train_size
+    train_data, test_data = random_split(dataset, [train_size, test_size])
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, num_workers=num_workers)
+    test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, num_workers=num_workers)
+
+    model = torch.load('archive/object_descriptor.pth')
+    model.eval()
+    dataiter = iter(test_loader)
+    images, labels = dataiter.next()
+    images = images.cuda()
+    output = model(images)
+    images = images.detach().cpu().numpy()
+    output = output.detach().cpu().numpy()
+
+
+    bcol = 3 
+
+    fig, axes = plt.subplots(nrows=2, ncols=bcol, sharex=True, sharey=True, figsize=(24,4))
+
+    for idx in np.arange(bcol):
+        ax = fig.add_subplot(2, bcol, idx+1, xticks=[], yticks=[])
+        ax.imshow(np.transpose(output[idx], (1, 2, 0)))
+
+        ax = fig.add_subplot(2, bcol, idx+bcol+1, xticks=[], yticks=[])
+        ax.imshow(np.transpose(images[idx], (1, 2, 0)))
+
+    # plot the first ten input images and then reconstructed images
+    # fig, axes = plt.subplots(nrows=2, ncols=10, sharex=True, sharey=True, figsize=(24,4))
+    # for idx in np.arange(20):
+    #     ax = fig.add_subplot(2, 20//2, idx+1, xticks=[], yticks=[])
+    #     imshow(images[idx])
+
+    plt.show()
+
+
+def train():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    transform = transforms.ToTensor()
+
+
+    num_workers = 0
+    batch_size = 20
+
+    dataset = AdroitImgDataset()
+    train_size = int(len(dataset)*0.7)
+    test_size = len(dataset) - train_size
+    train_data, test_data = random_split(dataset, [train_size, test_size])
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, num_workers=num_workers)
+    test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, num_workers=num_workers)
+
+
+    # initialize the NN
+    model_save_path = 'archive/object_descriptor.pth'
+    if os.path.exists(model_save_path):
+        print('load existing model...')
+        model = torch.load(model_save_path).to(device)
+    else:
+        print('creating new model...')
+        model = ConvAutoencoder().to(device)
+    # print(model)
+
+    criterion = nn.BCELoss()
+    # loss = criterion(outputs, images)
+    optimizer = torch.optim.Adam(model.parameters(), lr=10e-3)
+
+    # number of epochs to train the model
+    n_epochs = 50
+    
+    for epoch in range(1, n_epochs+1):
+
+        model.train()
+        train_loss = 0.0
+        for data in tqdm(train_loader, desc=f"Epoch {epoch}"):
+            images, _ = data
+            images = images.to(device)
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, images)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()*images.size(0)
+        train_loss = train_loss/len(train_loader)
+  
+        model.eval()
+        with torch.no_grad():  
+            test_loss = 0.0
+            for images, labels in test_loader:
+                images = images.to(device)
+                outputs = model(images)
+                loss = criterion(outputs, images)
+                test_loss += loss.item()*images.size(0)
+            test_loss = test_loss/len(test_loader)
+        print(f'Epoch: {epoch} \tTraining Loss: {train_loss:.6f}\tValidation Loss: {test_loss:.6f}')
+        torch.save(model, 'archive/object_descriptor.pth')
+
+
+
+if __name__ == '__main__':
+    # test_dataset()
+    # train()
+    test_reconstruction()
