@@ -30,7 +30,9 @@ episode_length: 200
 # Algorithm
 algorithm: DAPG
 
-num_cpu: 2
+# num_cpu: 2
+num_cpu: 1
+
 save_freq: 25
 eval_rollouts: 25
 

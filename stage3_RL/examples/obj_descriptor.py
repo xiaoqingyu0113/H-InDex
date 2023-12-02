@@ -24,10 +24,10 @@ def imshow(img):
 class CombinedEncoder(nn.Module):
     def __init__(self):
         super(CombinedEncoder, self).__init__()
-        self.encoder_desc = torch.load('archive/object_descriptor.pth').resnet50
+        self.encoder_desc = torch.load('/home/qingyu/forks/H-InDex/archive/resnet.pth')
         self.encoder_desc = nn.DataParallel(self.encoder_desc)
 
-        encoder_ckpt = 'archive/adapted_frankmocap_hand_ckpts/relocate-large_clamp.pth'
+        encoder_ckpt = '/home/qingyu/forks/H-InDex/archive/adapted_frankmocap_hand_ckpts/relocate-large_clamp.pth'
         self.encoder_posenet = make_encoder(encoder_type='hindex', device='cuda', is_eval=True, ckpt_path=encoder_ckpt, test_time_momentum=0.01)
         
         
@@ -65,7 +65,7 @@ class ConvAutoencoder(nn.Module):
         self.t_conv4 = nn.ConvTranspose2d(64, 3, 2, stride=2)
 
         self.lk_relu = nn.LeakyReLU(0.1)
-        self.resnet50  = models.resnet50(pretrained=True) 
+        self.resnet50  = models.resnet18(pretrained=True) 
         # for name, child in self.resnet50.named_children():
         #     if name not in ['layer4', 'fc']:
         #         for param in child.parameters():
@@ -196,7 +196,7 @@ def train():
     optimizer = torch.optim.Adam(model.parameters(), lr=10e-3)
 
     # number of epochs to train the model
-    n_epochs = 50
+    n_epochs = 1
     
     for epoch in range(1, n_epochs+1):
 
@@ -224,6 +224,7 @@ def train():
             test_loss = test_loss/len(test_loader)
         print(f'Epoch: {epoch} \tTraining Loss: {train_loss:.6f}\tValidation Loss: {test_loss:.6f}')
         torch.save(model, 'archive/object_descriptor.pth')
+        torch.save(model.resnet50,'archive/resnet.pth')
 
     
 def test_encoder():
@@ -251,6 +252,7 @@ def test_encoder2():
     img = preprocessor(img)
     features = c_encoder.get_features(img)
     print(features.shape)
+
 
 if __name__ == '__main__':
     # test_dataset()

@@ -44,6 +44,8 @@ import numpy as np
 from tqdm import tqdm
 import wandb
 import warnings
+from obj_descriptor import CombinedEncoder,ConvAutoencoder
+
 warnings.filterwarnings("ignore")
 
 home = str(Path.home())
@@ -91,11 +93,9 @@ def main(args : DictConfig):
             print("Please pass cameras in the arguments.")
             exit()
 
-        encoder = make_encoder(encoder_type=job_data['encoder_type'], device='cuda', is_eval=True, ckpt_path=job_data['encoder_ckpt'], test_time_momentum=args.test_time_momentum)
-        
-        ## add discriptor 
-        descriptor = torch.load('archive/object_descriptor.pth')
-        ## 
+        # encoder = make_encoder(encoder_type=job_data['encoder_type'], device='cuda', is_eval=True, ckpt_path=job_data['encoder_ckpt'], test_time_momentum=args.test_time_momentum)
+        encoder = CombinedEncoder()
+
 
         cam_list = [args.cam1] # Change this behavior. Pass list in hydra configs
         if args.cam2 is not None:
@@ -182,9 +182,10 @@ def main(args : DictConfig):
                 """
                 obs_img = torch.from_numpy(obs_img).float().to('cuda')
                 obs_img = obs_img.div(255.0).permute(0, 3, 1, 2)
-                feature_des = descriptor(obs_img)
+                # feature_des = descriptor(obs_img)
                 obs_img = encoder_preprocess(obs_img)
                 feature = encoder.get_features(obs_img)
+
                 return feature.reshape(-1)
 
             # start collecting demos
